@@ -1,4 +1,4 @@
-import { createSignal, createEffect, createElement } from '@/aslan';
+import { createSignal, createEffect, renderNode } from './aslan';
 
 const [currentPath, setCurrentPath] = createSignal(window.location.pathname);
 
@@ -109,13 +109,12 @@ export function Router(routes: Route[]): HTMLElement {
   return container;
 }
 
-export function Link({ href, children }: { href: string; children?: any }): HTMLElement {
-  return createElement('a', {
+export function Link({ href, children }: { href: string; children?: any }): Node {
+  return renderNode('a', {
     href,
-    children,
     onClick: (e: Event) => {
       e.preventDefault();
       navigate(href);
     },
-  }) as HTMLElement;
+  }, children);
 }

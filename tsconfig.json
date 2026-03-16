@@ -11,7 +11,7 @@
     "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
+      "@/*": ["./*"],
       "@aslan/jsx-runtime": ["src/jsx-runtime"],
       "@aslan/jsx-dev-runtime": ["src/jsx-dev-runtime"]
     }

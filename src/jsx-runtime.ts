@@ -1,9 +1,16 @@
-import { createElement, Fragment } from './aslan';
+import { renderNode, Fragment } from './aslan';
 import type { AslanIntrinsicElements } from './types';
 
-export { createElement as jsx, createElement as jsxs, Fragment };
+export { Fragment };
+
+export function jsx(tag: any, props: any): Node {
+  const { children, ...rest } = props ?? {};
+  return renderNode(tag, rest, children);
+}
+
+export { jsx as jsxs };
 
 export namespace JSX {
-  export type Element = HTMLElement;
+  export type Element = Node;
   export interface IntrinsicElements extends AslanIntrinsicElements {}
 }

@@ -1,5 +1,5 @@
 import './src/index.css';
-import { Router, buildRoutes } from '@/aslan-router';
+import { Router, buildRoutes } from '@/src/aslan-router';
 
 const views = import.meta.glob<{ default: () => HTMLElement }>(
   './views/**/view.tsx',

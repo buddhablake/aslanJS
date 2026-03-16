@@ -1,4 +1,4 @@
-import { Link } from '@/aslan-router';
+import { Link } from '@/src/aslan-router';
 
 export default function About() {
   return (

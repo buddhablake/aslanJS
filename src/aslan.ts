@@ -1,16 +1,18 @@
-import type { Effect, SignalGetter, SignalSetter, Signal, ElementTag, ElementProps, ElementChildren } from "./types.ts";
+import type { EffectFn, EffectContext, DisposeFn, SignalGetter, SignalSetter, Signal, ElementTag, ElementProps, ElementChildren } from "./types";
 
 export const Fragment = Symbol('Fragment');
 
-let currentEffect: Effect | null = null;
+let currentEffect: EffectContext | null = null;
+let currentDisposables: DisposeFn[] | null = null;
 
 export function createSignal<T>(initial: T): Signal<T> {
     let value = initial;
-    const subscribers = new Set<Effect>();
+    const subscribers = new Set<EffectContext>();
 
     const read: SignalGetter<T> = () => {
         if (currentEffect) {
             subscribers.add(currentEffect);
+            currentEffect.subscriptions.push(subscribers);
         }
         return value;
     };
@@ -21,30 +23,80 @@ export function createSignal<T>(initial: T): Signal<T> {
         } else {
             value = newValue;
         }
-        subscribers.forEach((effect) => effect());
+        const snapshot = [...subscribers];
+        snapshot.forEach((ctx) => ctx.execute());
     };
 
     return [read, write];
 }
 
-export function createEffect(effect: Effect) {
-    currentEffect = effect;
-    effect();
-    currentEffect = null;
+export function createEffect(fn: EffectFn): DisposeFn {
+    const ctx: EffectContext = {
+        fn,
+        cleanups: [],
+        subscriptions: [],
+        childDisposables: [],
+        execute() {
+            // Run cleanup callbacks from previous run
+            for (const cleanup of ctx.cleanups) cleanup();
+            ctx.cleanups = [];
+
+            // Dispose child effects from previous run
+            for (const dispose of ctx.childDisposables) dispose();
+            ctx.childDisposables = [];
+
+            // Remove self from all signal subscriber sets
+            for (const subSet of ctx.subscriptions) subSet.delete(ctx);
+            ctx.subscriptions = [];
+
+            // Save parent context
+            const prevEffect = currentEffect;
+            const prevDisposables = currentDisposables;
+
+            // Set up fresh tracking
+            currentEffect = ctx;
+            currentDisposables = ctx.childDisposables;
+
+            try {
+                fn();
+            } finally {
+                // Restore parent context
+                currentEffect = prevEffect;
+                currentDisposables = prevDisposables;
+            }
+        },
+    };
+
+    ctx.execute();
+
+    const dispose: DisposeFn = () => {
+        for (const cleanup of ctx.cleanups) cleanup();
+        ctx.cleanups = [];
+        for (const childDispose of ctx.childDisposables) childDispose();
+        ctx.childDisposables = [];
+        for (const subSet of ctx.subscriptions) subSet.delete(ctx);
+        ctx.subscriptions = [];
+    };
+
+    // Register with parent effect's disposables
+    if (currentDisposables) {
+        currentDisposables.push(dispose);
+    }
+
+    return dispose;
 }
 
-export function createElement(
+export function onCleanup(fn: EffectFn): void {
+    if (currentEffect) {
+        currentEffect.cleanups.push(fn);
+    }
+}
+
+export function renderNode(
   tag: ElementTag,
   props: ElementProps,
-  ...children: ElementChildren
-): HTMLElement {
-  const propsChildren = props?.children;
-  if (propsChildren !== undefined) {
-    const { children: _, ...rest } = props!;
-    props = rest;
-    children = Array.isArray(propsChildren) ? propsChildren : [propsChildren];
-  }
-
+  children: ElementChildren,
+): Node {
   if (typeof tag === 'function') {
     return tag({ ...props, children });
   }
@@ -65,7 +117,8 @@ export function createElement(
     }
   }
 
-  for (const child of children.flat()) {
+  const flatChildren = Array.isArray(children) ? children.flat() : (children != null ? [children] : []);
+  for (const child of flatChildren) {
     if (child == null || child === false) continue;
     if (typeof child === 'function') {
       const textNode = document.createTextNode('');
@@ -80,5 +133,5 @@ export function createElement(
     }
   }
 
-  return el as HTMLElement;
+  return el;
 }
