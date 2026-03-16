@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "@aslan",
+    "esModuleInterop": true,
+    "types": ["vite/client"],
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@aslan/jsx-runtime": ["src/jsx-runtime"],
+      "@aslan/jsx-dev-runtime": ["src/jsx-dev-runtime"]
+    }
+  },
+  "include": ["src", "views", "components", "main.tsx"]
+}
