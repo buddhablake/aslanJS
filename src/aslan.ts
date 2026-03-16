@@ -1,5 +1,7 @@
 import type { Effect, SignalGetter, SignalSetter, Signal, ElementTag, ElementProps, ElementChildren } from "./types.ts";
 
+export const Fragment = Symbol('Fragment');
+
 let currentEffect: Effect | null = null;
 
 export function createSignal<T>(initial: T): Signal<T> {
@@ -39,7 +41,7 @@ export function createElement(
   const propsChildren = props?.children;
   if (propsChildren !== undefined) {
     const { children: _, ...rest } = props!;
-    props = Object.keys(rest).length > 0 ? rest : null;
+    props = rest;
     children = Array.isArray(propsChildren) ? propsChildren : [propsChildren];
   }
 
@@ -47,9 +49,11 @@ export function createElement(
     return tag({ ...props, children });
   }
 
-  const el = document.createElement(tag);
+  const el = tag === Fragment
+    ? document.createDocumentFragment()
+    : document.createElement(tag as string);
 
-  if (props) {
+  if (props && el instanceof HTMLElement) {
     for (const [key, val] of Object.entries(props)) {
       if (key.startsWith('on')) {
         el.addEventListener(key.slice(2).toLowerCase(), val);
@@ -76,5 +80,5 @@ export function createElement(
     }
   }
 
-  return el;
+  return el as HTMLElement;
 }

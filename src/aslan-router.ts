@@ -35,24 +35,34 @@ function dirToRoute(filePath: string): string {
   return '/' + segments.join('/');
 }
 
+function buildLayoutMap(layouts: Record<string, Module>): Map<string, Module> {
+  const map = new Map<string, Module>();
+
+  for (const [filePath, mod] of Object.entries(layouts)) {
+    const dir = filePath
+      .replace(/^.*?views/, '')
+      .replace(/\/layout\.(tsx|ts|jsx|js)$/, '');
+    map.set(dir || '/', mod);
+  }
+
+  return map;
+}
+
 function collectLayouts(
   routePath: string,
-  layouts: Record<string, Module>
+  layoutMap: Map<string, Module>
 ): Module[] {
   const result: Module[] = [];
+
+  const rootLayout = layoutMap.get('/');
+  if (rootLayout) result.push(rootLayout);
+
   const parts = routePath === '/' ? [] : routePath.split('/').filter(Boolean);
-
-  const rootKey = Object.keys(layouts).find(k => /views\/layout\.(tsx|ts|jsx|js)$/.test(k));
-  if (rootKey) result.push(layouts[rootKey]);
-
   let accumulated = '';
   for (const part of parts) {
     accumulated += '/' + part;
-    const key = Object.keys(layouts).find(k => {
-      const dir = k.replace(/^.*?views/, '').replace(/\/layout\.(tsx|ts|jsx|js)$/, '');
-      return dir === accumulated;
-    });
-    if (key) result.push(layouts[key]);
+    const layout = layoutMap.get(accumulated);
+    if (layout) result.push(layout);
   }
 
   return result;
@@ -62,9 +72,11 @@ export function buildRoutes(
   views: Record<string, Module>,
   layouts: Record<string, Module>
 ): Route[] {
+  const layoutMap = buildLayoutMap(layouts);
+
   return Object.entries(views).map(([filePath, mod]) => {
     const path = dirToRoute(filePath);
-    const matchedLayouts = collectLayouts(path, layouts);
+    const matchedLayouts = collectLayouts(path, layoutMap);
 
     const component = () => {
       let content = mod.default();
@@ -98,10 +110,12 @@ export function Router(routes: Route[]): HTMLElement {
 }
 
 export function Link({ href, children }: { href: string; children?: any }): HTMLElement {
-  const anchor = createElement('a', { href, onClick: (e: Event) => {
-    e.preventDefault();
-    navigate(href);
-  }}, ...(Array.isArray(children) ? children : [children]));
-
-  return anchor as HTMLElement;
+  return createElement('a', {
+    href,
+    children,
+    onClick: (e: Event) => {
+      e.preventDefault();
+      navigate(href);
+    },
+  }) as HTMLElement;
 }

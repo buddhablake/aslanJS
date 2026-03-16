@@ -1,4 +1,7 @@
-import { createElement } from './aslan';
+import { createElement, Fragment } from './aslan';
+import type { AslanIntrinsicElements } from './types';
+
+export { Fragment };
 
 export function jsxDEV(
   type: any,
@@ -11,11 +14,7 @@ export function jsxDEV(
   return createElement(type, props);
 }
 
-export const Fragment = 'fragment';
-
 export namespace JSX {
   export type Element = HTMLElement;
-  export interface IntrinsicElements {
-    [tag: string]: Record<string, any>;
-  }
+  export interface IntrinsicElements extends AslanIntrinsicElements {}
 }
