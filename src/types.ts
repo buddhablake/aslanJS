@@ -8,6 +8,7 @@ export interface EffectContext {
   childDisposables: DisposeFn[];
   parent: EffectContext | null;
   contexts: Record<symbol, any>;
+  disposed: boolean;
   execute: () => void;
 }
 

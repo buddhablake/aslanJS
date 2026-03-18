@@ -67,6 +67,12 @@ export default function aslanBabelPlugin({ types: t }: any) {
     return result;
   }
 
+  function propKey(name: string): any {
+    return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name)
+      ? t.identifier(name)
+      : t.stringLiteral(name);
+  }
+
   function buildPropsObject(attributes: any[]): any {
     if (attributes.length === 0) {
       return t.nullLiteral();
@@ -95,8 +101,9 @@ export default function aslanBabelPlugin({ types: t }: any) {
           value = attr.value;
         }
 
+        const k = propKey(key);
         properties.push(
-          t.objectProperty(t.identifier(key), value)
+          t.objectProperty(k, value, !t.isIdentifier(k))
         );
       }
     }
@@ -133,7 +140,8 @@ export default function aslanBabelPlugin({ types: t }: any) {
             value = attr.value;
           }
 
-          properties.push(t.objectProperty(t.identifier(key), value));
+          const k = propKey(key);
+          properties.push(t.objectProperty(k, value, !t.isIdentifier(k)));
         }
       }
 

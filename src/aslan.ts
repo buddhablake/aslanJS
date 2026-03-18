@@ -26,19 +26,28 @@ export function createCause<T>(initial: T): Cause<T> {
     };
 
     const write: CauseSetter<T> = (newValue: T | ((prev: T) => T)) => {
+        const prev = value;
         if (typeof newValue === "function") {
             value = (newValue as (prev: T) => T)(value);
         } else {
             value = newValue;
         }
+        if (Object.is(prev, value)) return;
         const snapshot = [...subscribers];
-        snapshot.forEach((ctx) => ctx.execute());
+        for (const ctx of snapshot) {
+            if (!ctx.disposed) {
+                try { ctx.execute(); } catch (e) { console.error(e); }
+            }
+        }
     };
 
     return [read, write];
 }
 
 export function createEffect(fn: EffectFn): DisposeFn {
+    let isExecuting = false;
+    let pendingRerun = false;
+
     const ctx: EffectContext = {
         fn,
         cleanups: [],
@@ -46,7 +55,11 @@ export function createEffect(fn: EffectFn): DisposeFn {
         childDisposables: [],
         parent: currentOwner,
         contexts: {},
+        disposed: false,
         execute() {
+            if (ctx.disposed) return;
+            if (isExecuting) { pendingRerun = true; return; }
+
             for (const cleanup of ctx.cleanups) cleanup();
             ctx.cleanups = [];
 
@@ -63,13 +76,20 @@ export function createEffect(fn: EffectFn): DisposeFn {
             currentEffect = ctx;
             currentOwner = ctx;
             currentDisposables = ctx.childDisposables;
+            isExecuting = true;
 
             try {
                 fn();
             } finally {
+                isExecuting = false;
                 currentEffect = prevEffect;
                 currentOwner = prevOwner;
                 currentDisposables = prevDisposables;
+            }
+
+            if (pendingRerun) {
+                pendingRerun = false;
+                ctx.execute();
             }
         },
     };
@@ -77,6 +97,7 @@ export function createEffect(fn: EffectFn): DisposeFn {
     ctx.execute();
 
     const dispose: DisposeFn = () => {
+        ctx.disposed = true;
         for (const cleanup of ctx.cleanups) cleanup();
         ctx.cleanups = [];
         for (const childDispose of ctx.childDisposables) childDispose();
@@ -111,6 +132,7 @@ export function onCleanup(fn: EffectFn): void {
 
 function disposeScope(scope: EffectContext): DisposeFn {
     return () => {
+        scope.disposed = true;
         for (const cleanup of scope.cleanups) cleanup();
         scope.cleanups = [];
         for (const dispose of scope.childDisposables) dispose();
@@ -132,6 +154,7 @@ export function createComponent(Comp: Function, props: Record<string, any>): Nod
         childDisposables: [],
         parent: prevOwner,
         contexts: {},
+        disposed: false,
         execute: () => {},
     };
 
@@ -139,17 +162,43 @@ export function createComponent(Comp: Function, props: Record<string, any>): Nod
     currentOwner = scope;
     currentDisposables = scope.childDisposables;
 
-    const result = Comp(props);
-
-    currentEffect = prevEffect;
-    currentOwner = prevOwner;
-    currentDisposables = prevDisposables;
+    let result: Node;
+    try {
+        result = Comp(props);
+    } finally {
+        currentEffect = prevEffect;
+        currentOwner = prevOwner;
+        currentDisposables = prevDisposables;
+    }
 
     if (prevDisposables) {
         prevDisposables.push(disposeScope(scope));
     }
 
     return result;
+}
+
+const DOM_PROPERTIES = new Set([
+  'value', 'checked', 'selected', 'disabled', 'readOnly',
+  'multiple', 'indeterminate', 'defaultChecked', 'defaultValue',
+]);
+
+function setProp(el: HTMLElement, key: string, val: any): void {
+  if (val == null || val === false) {
+    if (key === 'className') {
+      el.className = '';
+    } else if (DOM_PROPERTIES.has(key)) {
+      (el as any)[key] = key === 'value' || key === 'defaultValue' ? '' : false;
+    } else {
+      el.removeAttribute(key);
+    }
+  } else if (key === 'className') {
+    el.className = val;
+  } else if (DOM_PROPERTIES.has(key)) {
+    (el as any)[key] = val;
+  } else {
+    el.setAttribute(key, val === true ? '' : val);
+  }
 }
 
 export function renderNode(
@@ -164,42 +213,27 @@ export function renderNode(
   if (props && el instanceof HTMLElement) {
     for (const [key, val] of Object.entries(props)) {
 
-      // Event handlers (onClick, onInput, etc.) are callbacks, not causes.
-      // Handle them first so the reactive check below doesn't wrap them.
-      if (key.startsWith('on')) {
+      if (key.startsWith('on') && key.length > 2 && key[2] === key[2].toUpperCase()) {
         el.addEventListener(key.slice(2).toLowerCase(), val);
 
-      // If the value is a function, it's a cause accessor passed without
-      // being called: <div class={color} />. Wrap in an effect so the
-      // attribute updates when the cause changes.
       } else if (typeof val === 'function') {
-        createEffect(() => {
-          const resolved = val();
-          if (key === 'className') {
-            el.className = resolved;
-          } else {
-            el.setAttribute(key, resolved);
-          }
-        });
+        createEffect(() => { setProp(el, key, val()); });
 
-      // Static values — set once, no tracking needed
-      } else if (key === 'className') {
-        el.className = val;
       } else {
-        el.setAttribute(key, val);
+        setProp(el, key, val);
       }
     }
   }
 
   const flatChildren = Array.isArray(children) ? children.flat() : (children != null ? [children] : []);
   for (const child of flatChildren) {
-    if (child == null || child === false) continue;
+    if (child == null || typeof child === 'boolean') continue;
 
-    // Cause accessor passed as child — reactive text node
     if (typeof child === 'function') {
       const textNode = document.createTextNode('');
       createEffect(() => {
-        textNode.textContent = String(child());
+        const resolved = child();
+        textNode.textContent = resolved == null ? '' : String(resolved);
       });
       el.appendChild(textNode);
     } else if (child instanceof Node) {
