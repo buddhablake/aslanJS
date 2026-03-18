@@ -105,7 +105,7 @@ export function Router(routes: Route[]): HTMLElement {
       container.appendChild(document.createTextNode('404 - Not Found'));
     }
   });
-
+  
   return container;
 }
 

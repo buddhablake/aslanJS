@@ -3,93 +3,90 @@ import type { EffectFn, EffectContext, DisposeFn, SignalGetter, SignalSetter, Si
 export const Fragment = Symbol('Fragment');
 
 let currentEffect: EffectContext | null = null;
-let currentDisposables: DisposeFn[] | null = null;
 
 export function createSignal<T>(initial: T): Signal<T> {
-    let value = initial;
-    const subscribers = new Set<EffectContext>();
+  let value = initial;
+  const subscribers = new Set<EffectContext>();
 
-    const read: SignalGetter<T> = () => {
-        if (currentEffect) {
-            subscribers.add(currentEffect);
-            currentEffect.subscriptions.push(subscribers);
-        }
-        return value;
-    };
+  const read: SignalGetter<T> = () => {
+    if (currentEffect) {
+      // this is how we create bi-directional links between signals and effects
+      // Here we are saying this is an effect that is going to need to re-run when this signal changes, so we add it to the list of subscribers for this signal.
+      subscribers.add(currentEffect);
+      // Here we saying that this effect is subscribed to the signal so it has awareness of all signals it is subscribed to, so we add the signal's subscriber list to the effect's list of subscriptions. This way when it comes time for cleanup, we can easily remove the effect from all the signals it is subscribed to.
+      currentEffect.subscriptions.push(subscribers);
+    }
+    return value;
+  };
 
-    const write: SignalSetter<T> = (newValue: T | ((prev: T) => T)) => {
-        if (typeof newValue === "function") {
-            value = (newValue as (prev: T) => T)(value);
-        } else {
-            value = newValue;
-        }
-        const snapshot = [...subscribers];
-        snapshot.forEach((ctx) => ctx.execute());
-    };
+  const write: SignalSetter<T> = (newValue: T | ((prev: T) => T)) => {
+    if (typeof newValue === "function") {
+      value = (newValue as (prev: T) => T)(value);
+    } else {
+      value = newValue;
+    }
+    const snapshot = [...subscribers];
+    snapshot.forEach((ctx) => ctx.execute());
+  };
 
-    return [read, write];
+  return [read, write];
 }
 
 export function createEffect(fn: EffectFn): DisposeFn {
-    const ctx: EffectContext = {
-        fn,
-        cleanups: [],
-        subscriptions: [],
-        childDisposables: [],
-        execute() {
-            // Run cleanup callbacks from previous run
-            for (const cleanup of ctx.cleanups) cleanup();
-            ctx.cleanups = [];
+  const ctx: EffectContext = {
+    fn,
+    cleanups: [],
+    execute() {
+      // Run user-registered cleanup callbacks (e.g. clearInterval)
+      for (const cleanup of ctx.cleanups) cleanup();
+      ctx.cleanups = [];
+      // Unsubscribe from all signals
+      for (const sub of ctx.subscriptions) {
+        sub.delete(ctx);
+      }
+      ctx.subscriptions = [];
+      // Dispose all child effects
+      for (const child of ctx.childDisposables) {
+        child();
+      }
+      ctx.childDisposables = [];
+      // Save/restore parent context for nesting
+      const prevEffect = currentEffect;
+      currentEffect = ctx;
+      fn();
+      currentEffect = prevEffect;
+    },
+    subscriptions: [],
+    childDisposables: [],
+  };
 
-            // Dispose child effects from previous run
-            for (const dispose of ctx.childDisposables) dispose();
-            ctx.childDisposables = [];
+  ctx.execute();
 
-            // Remove self from all signal subscriber sets
-            for (const subSet of ctx.subscriptions) subSet.delete(ctx);
-            ctx.subscriptions = [];
-
-            // Save parent context
-            const prevEffect = currentEffect;
-            const prevDisposables = currentDisposables;
-
-            // Set up fresh tracking
-            currentEffect = ctx;
-            currentDisposables = ctx.childDisposables;
-
-            try {
-                fn();
-            } finally {
-                // Restore parent context
-                currentEffect = prevEffect;
-                currentDisposables = prevDisposables;
-            }
-        },
-    };
-
-    ctx.execute();
-
-    const dispose: DisposeFn = () => {
-        for (const cleanup of ctx.cleanups) cleanup();
-        ctx.cleanups = [];
-        for (const childDispose of ctx.childDisposables) childDispose();
-        ctx.childDisposables = [];
-        for (const subSet of ctx.subscriptions) subSet.delete(ctx);
-        ctx.subscriptions = [];
-    };
-
-    // Register with parent effect's disposables
-    if (currentDisposables) {
-        currentDisposables.push(dispose);
+  const dispose: DisposeFn = () => {
+    for (const cleanup of ctx.cleanups) cleanup();
+    ctx.cleanups = [];
+    for (const sub of ctx.subscriptions) {
+      sub.delete(ctx);
     }
+    ctx.subscriptions = [];
+    for (const child of ctx.childDisposables) {
+      child();
+    }
+    ctx.childDisposables = [];
+  };
 
-    return dispose;
+  // Register with parent effect if one is running
+  if (currentEffect) {
+    currentEffect.childDisposables.push(dispose);
+  }
+
+  return dispose;
 }
 
 export function onCleanup(fn: EffectFn): void {
-    if (currentEffect) {
-        currentEffect.cleanups.push(fn);
-    }
+  if (currentEffect) {
+    currentEffect.cleanups.push(fn);
+  }
 }
 
 export function renderNode(

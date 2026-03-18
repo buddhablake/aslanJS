@@ -3,10 +3,10 @@ export type DisposeFn = () => void;
 
 export interface EffectContext {
   fn: EffectFn;
+  execute: () => void;
   cleanups: EffectFn[];
   subscriptions: Set<EffectContext>[];
   childDisposables: DisposeFn[];
-  execute: () => void;
 }
 
 export type SignalGetter<T> = () => T;
