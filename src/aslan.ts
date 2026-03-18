@@ -257,3 +257,29 @@ export function Provide(props: { contexts: ScopedCause<any>[], children?: Elemen
     const result = wrap(0);
     return result instanceof Node ? result : renderNode(Fragment, null, result);
 }
+
+export function getCurrentOwner(): EffectContext | null {
+    return currentOwner;
+}
+
+export function runWithOwner<T>(
+    owner: EffectContext | null,
+    fn: () => T,
+    disposables?: DisposeFn[]
+): T {
+    const prevEffect = currentEffect;
+    const prevOwner = currentOwner;
+    const prevDisposables = currentDisposables;
+
+    currentEffect = null;
+    currentOwner = owner;
+    currentDisposables = disposables ?? (owner ? owner.childDisposables : null);
+
+    try {
+        return fn();
+    } finally {
+        currentEffect = prevEffect;
+        currentOwner = prevOwner;
+        currentDisposables = prevDisposables;
+    }
+}

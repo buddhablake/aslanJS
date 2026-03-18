@@ -1,4 +1,5 @@
-import { createCause, createEffect, createComponent, renderNode, Fragment } from './aslan';
+import { createCause, createEffect, createComponent, renderNode, Fragment, getCurrentOwner, runWithOwner } from './aslan';
+import type { EffectContext, DisposeFn } from './types';
 
 const [currentPath, setCurrentPath] = createCause(window.location.pathname);
 
@@ -11,12 +12,13 @@ export function navigate(path: string) {
   setCurrentPath(path);
 }
 
+type Module = { default: (...args: any[]) => Node };
+
 export interface Route {
   path: string;
-  component: () => Node;
+  layouts: Module[];
+  view: Module;
 }
-
-type Module = { default: (...args: any[]) => Node };
 
 function normalizeDirName(name: string): string {
   return name
@@ -77,41 +79,92 @@ export function buildRoutes(
   return Object.entries(views).map(([filePath, mod]) => {
     const path = dirToRoute(filePath);
     const matchedLayouts = collectLayouts(path, layoutMap);
-
-    // Views and layouts are wrapped via createComponent so each gets
-    // an owner scope. Layouts receive the inner content as lazy children
-    // (getter on props), so Providers in layouts are set up before
-    // view content evaluates.
-    const component = () => {
-      let content: any = () => createComponent(mod.default, {});
-      for (let i = matchedLayouts.length - 1; i >= 0; i--) {
-        const layout = matchedLayouts[i];
-        const inner = content;
-        content = () => createComponent(layout.default, {
-          get children() { return inner(); }
-        });
-      }
-      return content();
-    };
-
-    return { path, component };
+    return { path, layouts: matchedLayouts, view: mod };
   });
+}
+
+interface MountedLayout {
+  module: Module;
+  childSlot: HTMLElement;
+  slotOwner: EffectContext | null;
+  dispose: DisposeFn;
 }
 
 export function Router(routes: Route[]): HTMLElement {
   const container = document.createElement('div');
+  let mounted: MountedLayout[] = [];
+  let viewCleanup: (() => void) | null = null;
 
   createEffect(() => {
     const path = currentPath();
-    const match = routes.find(r => r.path === path);
+    const route = routes.find(r => r.path === path);
 
-    container.innerHTML = '';
-
-    if (match) {
-      container.appendChild(match.component());
-    } else {
+    if (!route) {
+      if (viewCleanup) { viewCleanup(); viewCleanup = null; }
+      for (let i = mounted.length - 1; i >= 0; i--) mounted[i].dispose();
+      mounted.length = 0;
+      container.innerHTML = '';
       container.appendChild(document.createTextNode('404 - Not Found'));
+      return;
     }
+
+    const newLayouts = route.layouts;
+
+    let k = 0;
+    while (k < mounted.length && k < newLayouts.length && mounted[k].module === newLayouts[k]) {
+      k++;
+    }
+
+    if (viewCleanup) { viewCleanup(); viewCleanup = null; }
+
+    for (let i = mounted.length - 1; i >= k; i--) {
+      mounted[i].dispose();
+    }
+    mounted.splice(k);
+
+    let slot = k > 0 ? mounted[k - 1].childSlot : container;
+    slot.innerHTML = '';
+
+    for (let i = k; i < newLayouts.length; i++) {
+      const parentOwner = i > 0 ? mounted[i - 1].slotOwner : getCurrentOwner();
+      const childSlot = document.createElement('div');
+      childSlot.style.display = 'contents';
+      let slotOwner: EffectContext | null = null;
+      const disposables: DisposeFn[] = [];
+
+      const node = runWithOwner(parentOwner, () => {
+        return createComponent(newLayouts[i].default, {
+          get children() {
+            slotOwner = getCurrentOwner();
+            return childSlot;
+          }
+        });
+      }, disposables);
+
+      slot.appendChild(node);
+      mounted.push({
+        module: newLayouts[i],
+        childSlot,
+        slotOwner,
+        dispose: disposables[0],
+      });
+      slot = childSlot;
+    }
+
+    const viewOwner = mounted.length > 0
+      ? mounted[mounted.length - 1].slotOwner
+      : getCurrentOwner();
+    const viewDisposables: DisposeFn[] = [];
+
+    const viewNode = runWithOwner(viewOwner, () => {
+      return createComponent(route.view.default, {});
+    }, viewDisposables);
+
+    slot.appendChild(viewNode);
+
+    viewCleanup = () => {
+      if (viewDisposables[0]) viewDisposables[0]();
+    };
   });
 
   return container;
