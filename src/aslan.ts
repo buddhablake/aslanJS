@@ -317,3 +317,99 @@ export function runWithOwner<T>(
         currentDisposables = prevDisposables;
     }
 }
+
+// --- Control Flow Components ---
+
+export function Show(props: { when: () => any; fallback?: any; children?: ElementChildren }): Node {
+    const container = document.createElement('div');
+    container.style.display = 'contents';
+
+    createEffect(() => {
+        const condition = props.when();
+        container.innerHTML = '';
+        if (condition) {
+            container.appendChild(renderNode(Fragment, null, props.children as ElementChildren));
+        } else if (props.fallback != null) {
+            if (props.fallback instanceof Node) {
+                container.appendChild(props.fallback);
+            } else {
+                container.appendChild(renderNode(Fragment, null, props.fallback));
+            }
+        }
+    });
+
+    return container;
+}
+
+export function For(props: { each: () => any[]; children?: any }): Node {
+    const container = document.createElement('div');
+    container.style.display = 'contents';
+
+    createEffect(() => {
+        const list = props.each();
+        container.innerHTML = '';
+        if (list) {
+            const callback = props.children;
+            for (let i = 0; i < list.length; i++) {
+                const node = callback(list[i], i);
+                if (node instanceof Node) {
+                    container.appendChild(node);
+                }
+            }
+        }
+    });
+
+    return container;
+}
+
+export function Match(props: { when: () => any; children?: ElementChildren }): Node {
+    const marker = document.createComment('match');
+    (marker as any).__match = props;
+    return marker;
+}
+
+export function Switch(props: { fallback?: any; children?: ElementChildren }): Node {
+    const container = document.createElement('div');
+    container.style.display = 'contents';
+
+    const children = props.children;
+    const markers: Comment[] = [];
+
+    const collectMarkers = (child: any) => {
+        if (child instanceof Comment && (child as any).__match) {
+            markers.push(child);
+        } else if (Array.isArray(child)) {
+            child.forEach(collectMarkers);
+        }
+    };
+
+    if (Array.isArray(children)) {
+        children.forEach(collectMarkers);
+    } else {
+        collectMarkers(children);
+    }
+
+    createEffect(() => {
+        container.innerHTML = '';
+
+        let matched = false;
+        for (const marker of markers) {
+            const match = (marker as any).__match;
+            if (match.when()) {
+                container.appendChild(renderNode(Fragment, null, match.children as ElementChildren));
+                matched = true;
+                break;
+            }
+        }
+
+        if (!matched && props.fallback != null) {
+            if (props.fallback instanceof Node) {
+                container.appendChild(props.fallback);
+            } else {
+                container.appendChild(renderNode(Fragment, null, props.fallback));
+            }
+        }
+    });
+
+    return container;
+}
