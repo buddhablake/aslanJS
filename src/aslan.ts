@@ -320,12 +320,16 @@ export function runWithOwner<T>(
 
 // --- Control Flow Components ---
 
-export function Show(props: { when: () => any; fallback?: any; children?: ElementChildren }): Node {
+function resolve(value: any): any {
+    return typeof value === 'function' ? value() : value;
+}
+
+export function Show(props: { when: any; fallback?: any; children?: ElementChildren }): Node {
     const container = document.createElement('div');
     container.style.display = 'contents';
 
     createEffect(() => {
-        const condition = props.when();
+        const condition = resolve(props.when);
         container.innerHTML = '';
         if (condition) {
             container.appendChild(renderNode(Fragment, null, props.children as ElementChildren));
@@ -341,12 +345,12 @@ export function Show(props: { when: () => any; fallback?: any; children?: Elemen
     return container;
 }
 
-export function For(props: { each: () => any[]; children?: any }): Node {
+export function For(props: { each: any; children?: any }): Node {
     const container = document.createElement('div');
     container.style.display = 'contents';
 
     createEffect(() => {
-        const list = props.each();
+        const list = resolve(props.each);
         container.innerHTML = '';
         if (list) {
             const callback = props.children;
@@ -362,7 +366,7 @@ export function For(props: { each: () => any[]; children?: any }): Node {
     return container;
 }
 
-export function Match(props: { when: () => any; children?: ElementChildren }): Node {
+export function Match(props: { when: any; children?: ElementChildren }): Node {
     const marker = document.createComment('match');
     (marker as any).__match = props;
     return marker;
@@ -395,7 +399,7 @@ export function Switch(props: { fallback?: any; children?: ElementChildren }): N
         let matched = false;
         for (const marker of markers) {
             const match = (marker as any).__match;
-            if (match.when()) {
+            if (resolve(match.when)) {
                 container.appendChild(renderNode(Fragment, null, match.children as ElementChildren));
                 matched = true;
                 break;
