@@ -1,10 +1,11 @@
 import { Link } from "@/src/aslan-router";
 import Card from "@/components/Card";
-import { increment, decrement, reset } from "@/causes/counterCause";
+import useCounter from "@/causes/counterCause";
 import CounterOne from "@/components/counterOne";
 import CounterTwo from "@/components/counterTwo";
 
 export default function Home() {
+  const { increment, decrement, reset } = useCounter();
 
   return (
     <>
@@ -24,3 +25,4 @@ export default function Home() {
     </>
   );
 }
+

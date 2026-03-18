@@ -1,15 +1,23 @@
-import type { EffectFn, EffectContext, DisposeFn, SignalGetter, SignalSetter, Signal, ElementTag, ElementProps, ElementChildren } from "./types";
+import type { EffectFn, EffectContext, DisposeFn, CauseGetter, CauseSetter, Cause, ElementTag, ElementProps, ElementChildren, ScopedCause } from "./types";
 
 export const Fragment = Symbol('Fragment');
 
+// Two separate tracking variables:
+// - currentEffect: the currently executing effect (for signal subscriptions)
+// - currentOwner: the current owner scope (for cleanup, context, child registration)
+//
+// Effects set both. Component scopes set only currentOwner.
+// This prevents component-level signal reads from creating accidental
+// subscriptions — only effects track causes.
 let currentEffect: EffectContext | null = null;
+let currentOwner: EffectContext | null = null;
 let currentDisposables: DisposeFn[] | null = null;
 
-export function createSignal<T>(initial: T): Signal<T> {
+export function createCause<T>(initial: T): Cause<T> {
     let value = initial;
     const subscribers = new Set<EffectContext>();
 
-    const read: SignalGetter<T> = () => {
+    const read: CauseGetter<T> = () => {
         if (currentEffect) {
             subscribers.add(currentEffect);
             currentEffect.subscriptions.push(subscribers);
@@ -17,7 +25,7 @@ export function createSignal<T>(initial: T): Signal<T> {
         return value;
     };
 
-    const write: SignalSetter<T> = (newValue: T | ((prev: T) => T)) => {
+    const write: CauseSetter<T> = (newValue: T | ((prev: T) => T)) => {
         if (typeof newValue === "function") {
             value = (newValue as (prev: T) => T)(value);
         } else {
@@ -36,32 +44,31 @@ export function createEffect(fn: EffectFn): DisposeFn {
         cleanups: [],
         subscriptions: [],
         childDisposables: [],
+        parent: currentOwner,
+        contexts: {},
         execute() {
-            // Run cleanup callbacks from previous run
             for (const cleanup of ctx.cleanups) cleanup();
             ctx.cleanups = [];
 
-            // Dispose child effects from previous run
             for (const dispose of ctx.childDisposables) dispose();
             ctx.childDisposables = [];
 
-            // Remove self from all signal subscriber sets
             for (const subSet of ctx.subscriptions) subSet.delete(ctx);
             ctx.subscriptions = [];
 
-            // Save parent context
             const prevEffect = currentEffect;
+            const prevOwner = currentOwner;
             const prevDisposables = currentDisposables;
 
-            // Set up fresh tracking
             currentEffect = ctx;
+            currentOwner = ctx;
             currentDisposables = ctx.childDisposables;
 
             try {
                 fn();
             } finally {
-                // Restore parent context
                 currentEffect = prevEffect;
+                currentOwner = prevOwner;
                 currentDisposables = prevDisposables;
             }
         },
@@ -78,7 +85,6 @@ export function createEffect(fn: EffectFn): DisposeFn {
         ctx.subscriptions = [];
     };
 
-    // Register with parent effect's disposables
     if (currentDisposables) {
         currentDisposables.push(dispose);
     }
@@ -87,9 +93,63 @@ export function createEffect(fn: EffectFn): DisposeFn {
 }
 
 export function onCleanup(fn: EffectFn): void {
-    if (currentEffect) {
-        currentEffect.cleanups.push(fn);
+    if (currentOwner) {
+        currentOwner.cleanups.push(fn);
     }
+}
+
+// --- Component scoping ---
+//
+// createComponent is called by the compiled JSX for function components.
+// It creates an owner scope (for cleanup, context, child registration)
+// and runs the component within it. Component code does NOT track causes
+// (currentEffect stays null) — only effects created inside the component do.
+//
+// Children are passed as a getter on the props object by the compiler.
+// This means they evaluate lazily when the component accesses props.children,
+// AFTER the component has set up any context (e.g., Provider).
+
+function disposeScope(scope: EffectContext): DisposeFn {
+    return () => {
+        for (const cleanup of scope.cleanups) cleanup();
+        scope.cleanups = [];
+        for (const dispose of scope.childDisposables) dispose();
+        scope.childDisposables = [];
+        for (const subSet of scope.subscriptions) subSet.delete(scope);
+        scope.subscriptions = [];
+    };
+}
+
+export function createComponent(Comp: Function, props: Record<string, any>): Node {
+    const prevEffect = currentEffect;
+    const prevOwner = currentOwner;
+    const prevDisposables = currentDisposables;
+
+    const scope: EffectContext = {
+        fn: () => {},
+        cleanups: [],
+        subscriptions: [],
+        childDisposables: [],
+        parent: prevOwner,
+        contexts: {},
+        execute: () => {},
+    };
+
+    currentEffect = null;
+    currentOwner = scope;
+    currentDisposables = scope.childDisposables;
+
+    const result = Comp(props);
+
+    currentEffect = prevEffect;
+    currentOwner = prevOwner;
+    currentDisposables = prevDisposables;
+
+    if (prevDisposables) {
+        prevDisposables.push(disposeScope(scope));
+    }
+
+    return result;
 }
 
 export function renderNode(
@@ -97,10 +157,6 @@ export function renderNode(
   props: ElementProps,
   children: ElementChildren,
 ): Node {
-  if (typeof tag === 'function') {
-    return tag({ ...props, children });
-  }
-
   const el = tag === Fragment
     ? document.createDocumentFragment()
     : document.createElement(tag as string);
@@ -108,20 +164,16 @@ export function renderNode(
   if (props && el instanceof HTMLElement) {
     for (const [key, val] of Object.entries(props)) {
 
-      // Event handlers (onClick, onInput, etc.) are always functions,
-      // but they're callbacks — not signals. Handle them first so
-      // the reactive check below doesn't accidentally wrap them.
+      // Event handlers (onClick, onInput, etc.) are callbacks, not causes.
+      // Handle them first so the reactive check below doesn't wrap them.
       if (key.startsWith('on')) {
         el.addEventListener(key.slice(2).toLowerCase(), val);
 
-      // If the value is a function, it's a signal accessor like color()
-      // passed without being called: <div class={color} />.
-      // Wrap the attribute update in an effect so that when the signal
-      // changes, the effect re-runs and updates the attribute.
+      // If the value is a function, it's a cause accessor passed without
+      // being called: <div class={color} />. Wrap in an effect so the
+      // attribute updates when the cause changes.
       } else if (typeof val === 'function') {
         createEffect(() => {
-          // Call the signal inside the effect — this is what makes
-          // the signal system track this read and re-run on changes
           const resolved = val();
           if (key === 'className') {
             el.className = resolved;
@@ -130,7 +182,7 @@ export function renderNode(
           }
         });
 
-      // Static values (plain strings/numbers) — set once, no tracking needed
+      // Static values — set once, no tracking needed
       } else if (key === 'className') {
         el.className = val;
       } else {
@@ -142,6 +194,8 @@ export function renderNode(
   const flatChildren = Array.isArray(children) ? children.flat() : (children != null ? [children] : []);
   for (const child of flatChildren) {
     if (child == null || child === false) continue;
+
+    // Cause accessor passed as child — reactive text node
     if (typeof child === 'function') {
       const textNode = document.createTextNode('');
       createEffect(() => {
@@ -156,4 +210,50 @@ export function renderNode(
   }
 
   return el;
+}
+
+// --- Scoped Context API ---
+
+export function createScopedCause<T>(factory: () => T): ScopedCause<T> {
+    const key = Symbol();
+
+    // The consumer: walks up the owner tree to find the nearest
+    // Provider that matches, returns its context value.
+    const consume = (() => {
+        let owner = currentOwner;
+        while (owner) {
+            if (key in owner.contexts) return owner.contexts[key] as T;
+            owner = owner.parent;
+        }
+        throw new Error('No Provider found for this scoped cause');
+    }) as unknown as ScopedCause<T>;
+
+    // The Provider: runs the factory fresh and attaches the result
+    // to the current scope. Does NOT destructure props — children
+    // is a getter that must evaluate lazily (after context is set up).
+    consume.Provider = (props: { children?: ElementChildren }): Node => {
+        if (currentOwner) {
+            currentOwner.contexts[key] = factory();
+        }
+        return renderNode(Fragment, null, props.children as ElementChildren);
+    };
+
+    return consume;
+}
+
+// Flattens nested Providers into a single wrapper.
+// <Provide contexts={[useAuth, useTheme]}> is equivalent to
+// <useAuth.Provider><useTheme.Provider>...</useTheme.Provider></useAuth.Provider>
+export function Provide(props: { contexts: ScopedCause<any>[], children?: ElementChildren }): Node {
+    // Build a chain of nested Providers. Children are only accessed
+    // via getter at the innermost level, so all Providers have set up
+    // their context before children evaluate.
+    const wrap = (i: number): any => {
+        if (i >= props.contexts.length) return props.children;
+        return createComponent(props.contexts[i].Provider, {
+            get children() { return wrap(i + 1); }
+        });
+    };
+    const result = wrap(0);
+    return result instanceof Node ? result : renderNode(Fragment, null, result);
 }

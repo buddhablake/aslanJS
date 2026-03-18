@@ -1,15 +1,15 @@
-import {createSignal} from "../src/aslan";
+import { createCause, createScopedCause } from "../src/aslan";
 
-export const [count, setCount] = createSignal(0);
+const useCounter = createScopedCause(() => {
+    const [count, setCount] = createCause(0);
 
-export function increment() {
-    setCount(count() + 1);
-}
+    return {
+        count,
+        setCount,
+        increment: () => setCount(c => c + 1),
+        decrement: () => setCount(c => c - 1),
+        reset: () => setCount(0),
+    };
+});
 
-export function decrement() {
-    setCount(count() - 1);
-}
-
-export function reset() {
-    setCount(0);
-}
+export default useCounter;

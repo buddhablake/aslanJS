@@ -15,7 +15,7 @@ That was our bug. In Aslan, **effects** are the waiters. **Signals** are the kit
 A signal is a box that holds a value and **knows who's watching it**.
 
 ```ts
-const [count, setCount] = createSignal(0);
+const [count, setCount] = createCause(0);
 ```
 
 - `count()` — open the box and peek at the value
@@ -171,7 +171,7 @@ Here's a concrete walkthrough. You're on the Home page:
 ```
 Router effect runs
   └── Home component executes
-       ├── createSignal(0) → creates [count, setCount]
+       ├── createCause(0) → creates [count, setCount]
        ├── setInterval → starts a timer
        ├── onCleanup → registers "clearInterval" on the Router's effect
        └── <div>{count}</div> → createEffect for reactive text

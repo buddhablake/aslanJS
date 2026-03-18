@@ -4,17 +4,14 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
-    "jsx": "react-jsx",
-    "jsxImportSource": "@aslan",
+    "jsx": "preserve",
     "esModuleInterop": true,
     "types": ["vite/client"],
     "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
       "@/*": ["./*"],
-      "@aslan/jsx-runtime": ["src/jsx-runtime"],
-      "@aslan/jsx-dev-runtime": ["src/jsx-dev-runtime"]
     }
   },
-  "include": ["src", "views", "components", "main.tsx"]
+  "include": ["src", "views", "components", "causes", "main.tsx"]
 }

@@ -1,6 +1,6 @@
-import { createSignal, createEffect, renderNode } from './aslan';
+import { createCause, createEffect, createComponent, renderNode, Fragment } from './aslan';
 
-const [currentPath, setCurrentPath] = createSignal(window.location.pathname);
+const [currentPath, setCurrentPath] = createCause(window.location.pathname);
 
 window.addEventListener('popstate', () => {
   setCurrentPath(window.location.pathname);
@@ -78,12 +78,20 @@ export function buildRoutes(
     const path = dirToRoute(filePath);
     const matchedLayouts = collectLayouts(path, layoutMap);
 
+    // Views and layouts are wrapped via createComponent so each gets
+    // an owner scope. Layouts receive the inner content as lazy children
+    // (getter on props), so Providers in layouts are set up before
+    // view content evaluates.
     const component = () => {
-      let content = mod.default();
+      let content: any = () => createComponent(mod.default, {});
       for (let i = matchedLayouts.length - 1; i >= 0; i--) {
-        content = matchedLayouts[i].default({ children: content });
+        const layout = matchedLayouts[i];
+        const inner = content;
+        content = () => createComponent(layout.default, {
+          get children() { return inner(); }
+        });
       }
-      return content;
+      return content();
     };
 
     return { path, component };
@@ -109,12 +117,12 @@ export function Router(routes: Route[]): HTMLElement {
   return container;
 }
 
-export function Link({ href, children }: { href: string; children?: any }): Node {
+export function Link(props: { href: string; children?: any }): Node {
   return renderNode('a', {
-    href,
+    href: props.href,
     onClick: (e: Event) => {
       e.preventDefault();
-      navigate(href);
+      navigate(props.href);
     },
-  }, children);
+  }, props.children);
 }
