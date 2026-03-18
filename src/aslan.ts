@@ -107,8 +107,30 @@ export function renderNode(
 
   if (props && el instanceof HTMLElement) {
     for (const [key, val] of Object.entries(props)) {
+
+      // Event handlers (onClick, onInput, etc.) are always functions,
+      // but they're callbacks — not signals. Handle them first so
+      // the reactive check below doesn't accidentally wrap them.
       if (key.startsWith('on')) {
         el.addEventListener(key.slice(2).toLowerCase(), val);
+
+      // If the value is a function, it's a signal accessor like color()
+      // passed without being called: <div class={color} />.
+      // Wrap the attribute update in an effect so that when the signal
+      // changes, the effect re-runs and updates the attribute.
+      } else if (typeof val === 'function') {
+        createEffect(() => {
+          // Call the signal inside the effect — this is what makes
+          // the signal system track this read and re-run on changes
+          const resolved = val();
+          if (key === 'className') {
+            el.className = resolved;
+          } else {
+            el.setAttribute(key, resolved);
+          }
+        });
+
+      // Static values (plain strings/numbers) — set once, no tracking needed
       } else if (key === 'className') {
         el.className = val;
       } else {

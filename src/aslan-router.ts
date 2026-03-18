@@ -13,10 +13,10 @@ export function navigate(path: string) {
 
 export interface Route {
   path: string;
-  component: () => HTMLElement;
+  component: () => Node;
 }
 
-type Module = { default: (...args: any[]) => HTMLElement };
+type Module = { default: (...args: any[]) => Node };
 
 function normalizeDirName(name: string): string {
   return name
