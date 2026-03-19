@@ -183,7 +183,18 @@ const DOM_PROPERTIES = new Set([
   'multiple', 'indeterminate', 'defaultChecked', 'defaultValue',
 ]);
 
-function setProp(el: HTMLElement, key: string, val: any): void {
+function setProp(el: Element, key: string, val: any): void {
+  // SVG elements use attributes for everything — they don't have DOM
+  // properties like value/checked the way HTML elements do.
+  if (el instanceof SVGElement) {
+    if (val == null || val === false) {
+      el.removeAttribute(key);
+    } else {
+      el.setAttribute(key, val === true ? '' : String(val));
+    }
+    return;
+  }
+
   if (val == null || val === false) {
     if (key === 'className') {
       el.className = '';
@@ -201,16 +212,21 @@ function setProp(el: HTMLElement, key: string, val: any): void {
   }
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
 export function renderNode(
   tag: ElementTag,
   props: ElementProps,
   children: ElementChildren,
+  isSVG?: boolean,
 ): Node {
   const el = tag === Fragment
     ? document.createDocumentFragment()
-    : document.createElement(tag as string);
+    : isSVG
+      ? document.createElementNS(SVG_NS, tag as string)
+      : document.createElement(tag as string);
 
-  if (props && el instanceof HTMLElement) {
+  if (props && (el instanceof HTMLElement || el instanceof SVGElement)) {
     for (const [key, val] of Object.entries(props)) {
 
       if (key.startsWith('on') && key.length > 2 && key[2] === key[2].toUpperCase()) {
